@@ -13,7 +13,6 @@ from task.tools.deployment.web_search_agent_tool import WebSearchAgentTool
 from task.utils.constants import DIAL_ENDPOINT, DEPLOYMENT_NAME
 
 
-#TODO:
 # 1. Create CalculationsApplication class and extend ChatCompletion
 # 2. As a tools for CalculationsAgent you need to provide:
 #   - SimpleCalculatorTool
@@ -26,4 +25,53 @@ from task.utils.constants import DIAL_ENDPOINT, DEPLOYMENT_NAME
 #    the CalculationsApplication
 # 5. Add starter with DIALApp, port is 5001 (see core config)
 
-raise NotImplementedError()
+class CalculationsApplication(ChatCompletion):
+    def __init__(self):
+        super().__init__()
+        self.tools: list[BaseTool] = []
+
+    async def _init_tools(self)-> list[BaseTool]:
+        mcp_url = os.getenv('PYINTERPRETER_MCP_URL', "http://localhost:8050/mcp")
+
+        tools: list[BaseTool] = [
+            SimpleCalculatorTool(),
+            await PythonCodeInterpreterTool.create(
+                mcp_url=mcp_url,
+                tool_name="execute_code",
+                dial_endpoint=DIAL_ENDPOINT,
+            ),
+            ContentManagementAgentTool(DIAL_ENDPOINT),
+            WebSearchAgentTool(DIAL_ENDPOINT),
+        ]
+        return tools
+
+    async def chat_completion(
+            self,
+            request: Request,
+            response: Response
+    ) -> None:
+        if not self.tools:
+            self.tools = await self._init_tools()
+
+        agent = CalculationsAgent(
+            endpoint=DIAL_ENDPOINT,
+            tools=self.tools,
+        )
+
+        with response.create_single_choice() as choice:
+            await agent.handle_request(
+                deployment_name=DEPLOYMENT_NAME,
+                choice=choice,
+                request=request,
+                response=response
+            )
+
+
+app = DIALApp()
+app.add_chat_completion(
+    deployment_name="calculations-agent",
+    impl=CalculationsApplication(),
+)
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=5001)

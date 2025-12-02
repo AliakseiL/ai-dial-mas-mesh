@@ -14,7 +14,7 @@ from task.utils.constants import DIAL_ENDPOINT, DEPLOYMENT_NAME
 
 _DDG_MCP_URL = os.getenv('DDG_MCP_URL', "http://localhost:8051/mcp")
 
-#TODO:
+
 # 1. Create WebSearchApplication class and extend ChatCompletion
 # 2. As a tools for WebSearchAgent you need to provide:
 #   - MCP tools by _DDG_MCP_URL
@@ -25,3 +25,55 @@ _DDG_MCP_URL = os.getenv('DDG_MCP_URL', "http://localhost:8051/mcp")
 # 4. Create DIALApp with deployment_name `web-search-agent` (the same as in the core config) and impl is instance
 #    of the WebSearchApplication
 # 5. Add starter with DIALApp, port is 5003 (see core config)
+
+class WebSearchApplication(ChatCompletion):
+    def __init__(self):
+        super().__init__()
+
+        self.tools: list[BaseTool] = []
+
+    async def _init_tools(self) -> list[BaseTool]:
+
+        tools: list[BaseTool] = [CalculationsAgentTool(DIAL_ENDPOINT),
+                                 ContentManagementAgentTool(DIAL_ENDPOINT)]
+        mcp_client = await MCPClient.create(_DDG_MCP_URL)
+        for mcp_tool_model in await mcp_client.get_tools():
+            tools.append(
+                MCPTool(
+                    client=mcp_client,
+                    mcp_tool_model=mcp_tool_model,
+                )
+            )
+
+        return tools
+
+    async def chat_completion(
+            self,
+            request: Request,
+            response: Response
+    ) -> None:
+        if not self.tools:
+            self.tools = await self._init_tools()
+
+        agent = WebSearchAgent(
+            endpoint=DIAL_ENDPOINT,
+            tools=self.tools,
+        )
+
+        with response.create_single_choice() as choice:
+            await agent.handle_request(
+                deployment_name=DEPLOYMENT_NAME,
+                choice=choice,
+                request=request,
+                response=response
+            )
+
+
+# Create DIALApp with deployment_name `web-search-agent` and impl is instance of WebSearchApplication
+app = DIALApp()
+app.add_chat_completion(
+    deployment_name="web-search-agent",
+    impl=WebSearchApplication(),
+)
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=5003)

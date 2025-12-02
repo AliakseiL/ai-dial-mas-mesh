@@ -11,7 +11,6 @@ from task.tools.deployment.calculations_agent_tool import CalculationsAgentTool
 from task.tools.deployment.web_search_agent_tool import WebSearchAgentTool
 from task.utils.constants import DIAL_ENDPOINT, DEPLOYMENT_NAME
 
-#TODO:
 # 1. Create ContentManagementApplication class and extend ChatCompletion
 # 2. As a tools for ContentManagementAgent you need to provide:
 #   - FileContentExtractionTool
@@ -24,4 +23,42 @@ from task.utils.constants import DIAL_ENDPOINT, DEPLOYMENT_NAME
 #    of the ContentManagementApplication
 # 5. Add starter with DIALApp, port is 5002 (see core config)
 
-raise NotImplementedError()
+class ContentManagementApplication(ChatCompletion):
+    def __init__(self):
+        super().__init__()
+
+        document_cache = DocumentCache()
+
+        tools: list[BaseTool] = [
+            FileContentExtractionTool(DIAL_ENDPOINT),
+            RagTool(endpoint=DIAL_ENDPOINT,
+                deployment_name=DEPLOYMENT_NAME,
+                document_cache=DocumentCache.create()),
+            CalculationsAgentTool(DIAL_ENDPOINT),
+            WebSearchAgentTool(DIAL_ENDPOINT),
+        ]
+
+        self.agent = ContentManagementAgent(
+            endpoint=DIAL_ENDPOINT,
+            tools=tools,
+        )
+
+    async def chat_completion(
+            self,
+            request: Request,
+            response: Response
+    ) -> None:
+        with response.create_single_choice() as choice:
+            await self.agent.handle_request(
+                deployment_name=DEPLOYMENT_NAME,
+                choice=choice,
+                request=request,
+                response=response
+            )
+
+# Create DIALApp with deployment_name `content-management-agent` and impl is instance of ContentManagementApplication
+app = DIALApp()
+app.add_chat_completion(deployment_name="content-management-agent", impl=ContentManagementApplication())
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=5002)
